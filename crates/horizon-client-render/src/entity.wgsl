@@ -229,6 +229,13 @@ fn crumbling_uv(uv: vec2<f32>, packed_origin: vec2<f32>, sprite_size: vec2<f32>,
 @fragment fn fs_entity(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     return entity_color(in, front);
 }
+// Translucent items' fully opaque texels only, drawn with depth writes before
+// the blended pass: crossed planes then hide each other's far halves.
+@fragment fn fs_entity_opaque_texels(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let color = entity_color(in, front);
+    if color.a < 0.999 { discard; }
+    return color;
+}
 fn entity_color(in: Out, front: bool) -> vec4<f32> {
     var uv = in.uv;
     if in.overlay == 6u { uv.y = in.wrap.x + fract(in.uv.y) * in.wrap.y; }

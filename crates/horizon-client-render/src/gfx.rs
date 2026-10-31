@@ -494,6 +494,8 @@ pub struct Renderer {
     crumbling_pipeline: wgpu::RenderPipeline,
     shadow_blob_pipeline: wgpu::RenderPipeline,
     translucent_item_pipeline: wgpu::RenderPipeline,
+    /// The opaque texels of translucent items, with depth writes.
+    translucent_item_opaque_pipeline: wgpu::RenderPipeline,
     /// `RenderPipelines.WATER_MASK`: depth writes only, no colour.
     water_mask_pipeline: wgpu::RenderPipeline,
     cloud_pipeline: wgpu::RenderPipeline,
@@ -2277,6 +2279,22 @@ impl Renderer {
             alpha_blend,
             false,
         );
+        // Their fully opaque texels first, writing depth: without it, two
+        // crossed planes (a cross-model crop in an item display) blend in
+        // submission order, so each plane's far half draws over the other's
+        // near half, and the error moves with the camera. Semi-transparent
+        // texels still blend without writes, so water behind glass stays.
+        let translucent_item_opaque_pipeline = entity_pipeline_with(
+            "Translucent items, opaque texels",
+            None,
+            true,
+            wgpu::CompareFunction::GreaterEqual,
+            Default::default(),
+            alpha_blend,
+            false,
+            "fs_entity_opaque_texels",
+            wgpu::ColorWrites::ALL,
+        );
         let cloud_pipeline = entity_pipeline(
             "Clouds",
             Some(wgpu::Face::Back),
@@ -2905,6 +2923,7 @@ impl Renderer {
             crumbling_pipeline,
             shadow_blob_pipeline,
             translucent_item_pipeline,
+            translucent_item_opaque_pipeline,
             water_mask_pipeline,
             cloud_pipeline,
             cloud_mesh: Default::default(),
@@ -5514,14 +5533,13 @@ impl Renderer {
                 pass.set_bind_group(0, &self.group, &[]);
             }
             if translucent_item_quads > 0 && !oit_on {
-                pass.set_pipeline(&self.translucent_item_pipeline);
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw_indexed(
-                    0..translucent_item_quads * 6,
-                    ((base_quads - translucent_item_quads) * 4) as i32,
-                    0..1,
-                );
+                let base = ((base_quads - translucent_item_quads) * 4) as i32;
+                pass.set_pipeline(&self.translucent_item_opaque_pipeline);
+                pass.draw_indexed(0..translucent_item_quads * 6, base, 0..1);
+                pass.set_pipeline(&self.translucent_item_pipeline);
+                pass.draw_indexed(0..translucent_item_quads * 6, base, 0..1);
                 pass.set_bind_group(0, &self.group, &[]);
             }
             if !pack_draws_weather && !oit_on {
